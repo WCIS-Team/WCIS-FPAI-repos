@@ -1,0 +1,8 @@
+[submodule "HA4FPAI"]
+	path = HA4FPAI
+	url = https://github.com/WCIS-Team/HA4FPAI.git
+	branch = master
+[submodule "fmql30tai-sdi-npu-face-recognition"]
+	path = fmql30tai-sdi-npu-face-recognition
+	url = https://github.com/WCIS-Team/fmql30tai-sdi-npu-face-recognition.git
+	branch = main
