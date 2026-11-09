@@ -54,7 +54,7 @@ set_property IOSTANDARD LVCMOS18 [get_ports MDIO_PHY_0_mdio_io]
 
 # --- 复位 ---
 # 现在这一位由 BD 里的 xlconstant 恒 1（= 不复位）。谁该驱动它还没定，
-# 见 plnet.md §八 待裁第 6 条；本行只是把脚位与名字固定下来。
+# 见 pl_eth_psgem1_emio.md §八 待裁第 6 条；本行只是把脚位与名字固定下来。
 set_property PACKAGE_PIN AA13 [get_ports {phy_reset_n[0]}]
 set_property IOSTANDARD LVCMOS18 [get_ports {phy_reset_n[0]}]
 

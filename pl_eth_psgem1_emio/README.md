@@ -1,4 +1,4 @@
-# plnet — PL 侧以太网口（路线 A2）脚本与改动快照
+# pl_eth_psgem1_emio — PL 侧以太网口（路线 A2：PS GEM1 经 EMIO 透传）脚本与改动快照
 
 FMQL30TAI676H「悟净」板上那颗接在 PL 侧的 YT8521：走 **PS GEM1 → EMIO → `GMII_to_RGMII` v4.0 → PL 引脚** 这条路线（内部代号 **A2**）。
 
@@ -62,5 +62,5 @@ cd /s/work/WCIS/workenv/pl_eth
 ## 证据与文档
 
 - 证据日志（`stage*.log`、`runme.log`、`xvlog_a2.log`、`a2_xdc_rt_pass2.xdc`）：`S:\work\WCIS\workenv\pl_eth\`，不入库。
-- 正本文档：`S:\work\WCIS\wiki\PL\FPGA\PL网口bring-up与GEM1EMIO.md`（做事的全部读数，第 12.1.1 节是本轮）、`S:\work\WCIS\wiki\PL\plnet.md`（路线与待裁）。
+- 正本文档：`S:\work\WCIS\wiki\PL\FPGA\PL网口bring-up与GEM1EMIO.md`（做事的全部读数，第 12.1.1 节是本轮）、`S:\work\WCIS\wiki\PL\pl_eth_psgem1_emio.md`（路线与待裁）。
 - 厂商工程原件：`S:\apps\llm\agentwork\fpga-src\fpai_demo_fpga\`（**勿改**）。
