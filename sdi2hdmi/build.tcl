@@ -70,14 +70,7 @@ if {$have_unisim} {
     puts "BUILD: WARNING no unisim_comp.v found on the usual paths."
     puts "BUILD:          PS7-less design may not need it; the run will tell us."
 }
-if {!$have_unisim} {
-    puts "BUILD: WARNING no unisim_comp.v found on the usual paths."
-    puts "BUILD:          PS7-less design may not need it; the run will tell us."
-}
 
-#-----------------------------------------------------------------------------
-# Sources
-#-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
 # Sources
 #

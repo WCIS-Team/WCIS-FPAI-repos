@@ -69,7 +69,7 @@ module hdmi_out #(
     parameter integer V_BP     = 20,
     parameter integer HS_POL   = 1,
     parameter integer VS_POL   = 1,
-    parameter integer SLOTS    = 4,          // line slots, power of two
+    parameter integer SLOTS    = 8,          // line slots, MUST be a power of two; AW below is derived from it
     parameter integer ALIGN_EPS = 4          // alignment target, see below
 ) (
     // ---- write side: scaler output, SDI pixel clock ----------------------
@@ -122,7 +122,7 @@ module hdmi_out #(
 
     localparam integer H_TOTAL = H_ACTIVE + H_FP + H_SYNC + H_BP;   // 1650
     localparam integer V_TOTAL = V_ACTIVE + V_FP + V_SYNC + V_BP;   // 750
-    localparam integer AW      = 3;                                // 8 slots max
+    localparam integer AW      = $clog2(SLOTS);                    // 3 for SLOTS=8; keep SLOTS a power of two
 
     //--------------------------------------------------------------------------
     // Line slots. One RAMB36 each.
@@ -229,7 +229,7 @@ module hdmi_out #(
 
     // Slot index concatenated with the pixel index. Both clocks address the
     // same array; that is the whole point of having one array.
-    wire [MEM_AW-1:0] w_addr = {w_bin[2:0], w_x[X_AW-1:0]};
+    wire [MEM_AW-1:0] w_addr = {w_bin[AW-1:0], w_x[X_AW-1:0]};
 
     always @(posedge wclk) begin
         if (!wrst_n) begin
@@ -292,7 +292,7 @@ module hdmi_out #(
     //--------------------------------------------------------------------------
     reg  [11:0] hcnt, vcnt;
     reg  [11:0] px;           // pixel index inside the active line
-    reg  [2:0]  slot_q;       // slot being streamed this line
+    reg  [AW-1:0]  slot_q;   // slot being streamed this line
     reg         armed_q;      // a slot has been claimed for the coming line
     reg  [15:0] hold_q;       // last good pixel, held while starved
     reg         sync_d1, vs_d1, de_d1;   // output alignment, stage 1
@@ -468,7 +468,7 @@ module hdmi_out #(
                 // r_empty, not the old w_empty: this register is clocked by
                 // rclk, so the flag has to be resolved in the read domain.
                 if (!r_empty) begin
-                    slot_q  <= r_bin[2:0];
+                    slot_q  <= r_bin[AW-1:0];
                     armed_q <= 1'b1;
                     r_bin   <= r_bin + 1'b1;
                     r_gray  <= bin2gray(r_bin + 1'b1);

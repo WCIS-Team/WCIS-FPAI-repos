@@ -1,9 +1,27 @@
 #=============================================================================
-# build.tcl -- one-shot synth + implement + bitstream for sdi2hdmi
+# build_synth.tcl -- SYNTHESIS ONLY for sdi2hdmi.
 #
-# Driven by compile.ps1, or by hand:
+# Driven by compile.ps1 -SynthOnly, or by hand:
 #   S:\apps\Xilinx\Vivado\2018.3\bin\vivado.bat -mode batch -nojournal ^
-#       -source build.tcl
+#       -source build_synth.tcl
+#
+# This is the FIRST half of the split flow. It stops after synthesis and writes
+# .build/post_synth.dcp. The second half (opt/place/route/bitstream) is
+# compile_impl.ps1 -> impl_only.tcl, which resumes from that checkpoint.
+#
+# WHY THE SPLIT (read this before "simplifying" it back to a one-shot):
+#   The Vivado install on this machine intermittently loses visibility of its
+#   own runtime scripts and dies with exit code -1 and a truncated log, at a
+#   different phase on every run:
+#     couldn't read file ".../scripts/rt/data/unimacro/unimacro_verilog.tcl"
+#     couldn't read file ".../scripts/rt/fpga_tcl/rtSynthCleanup.tcl"
+#   PowerShell reads those same files every time, so it is not a missing file
+#   and not anything in the design. Synthesis is the longest phase and therefore
+#   the most likely place to hit it, so it is done ONCE here and the result is
+#   reused by impl_only.tcl. Running the implementation here (which a previous
+#   edit accidentally did by copying build.tcl verbatim) destroys that whole
+#   point: a synth-time crash throws away the implementation work, and the
+#   "resume from checkpoint" step has nothing to resume or re-does everything.
 #
 # This is a non-project flow on purpose. The vendor delivery is a .xpr with a
 # prebuilt block design and a 71 MB EDIF NPU netlist that cannot be elaborated
@@ -11,8 +29,8 @@
 # read_verilog / read_edif / synth_design / opt / place / route keeps the run
 # short, the log readable, and every source file visible in one place.
 #
-# The smpte_sdi decoder is EDIF-only (rtl/sdi/ip/smpte_sdi/smpte_sdi.edif, no
-# RTL), read the same way the vendor project reads it, with a stub supplying
+# The smpte_sdi decoder is EDIF-only (rtl/vendor/ip/smpte_sdi/smpte_sdi.edf,
+# no RTL), read the same way the vendor project reads it, with a stub supplying
 # the port declaration for elaboration.
 #
 # Requires the vendor device-library patch to be installed, the same one the
@@ -20,8 +38,8 @@
 #   scripts\rt\data\unisim_comp.v and unisim_comp.lib, from
 #   S:\work\WCIS\fdw\20260916\JFM_Kits\ip_patch\100ai\
 # Without it, synthesis reports the PS7 IP's AI_IN ports as nonexistent. This
-# design has no PS7, so it may well not be needed -- build.tcl reports whether
-# unisim_comp.v is visible so the answer is recorded rather than guessed.
+# design has no PS7, so it may well not be needed -- build_synth.tcl reports
+# whether unisim_comp.v is visible so the answer is recorded rather than guessed.
 #=============================================================================
 
 set SCRIPT_DIR [file dirname [file normalize [info script]]]
@@ -70,14 +88,7 @@ if {$have_unisim} {
     puts "BUILD: WARNING no unisim_comp.v found on the usual paths."
     puts "BUILD:          PS7-less design may not need it; the run will tell us."
 }
-if {!$have_unisim} {
-    puts "BUILD: WARNING no unisim_comp.v found on the usual paths."
-    puts "BUILD:          PS7-less design may not need it; the run will tell us."
-}
 
-#-----------------------------------------------------------------------------
-# Sources
-#-----------------------------------------------------------------------------
 #-----------------------------------------------------------------------------
 # Sources
 #
@@ -187,36 +198,12 @@ set_param general.maxThreads $JOBS
 synth_design -top sdi2hdmi_top -part xc7z030ffg676-2 -flatten_hierarchy rebuilt
 puts "BUILD: synth_design finished"
 
+# Stop here. The checkpoint below is what compile_impl.ps1 -> impl_only.tcl
+# resumes from. Do NOT run opt_design / place_design / route_design / bitstream
+# here -- that is the whole point of the two-step split.
 write_checkpoint -force [file join $OUTDIR post_synth.dcp]
 report_utilization -file [file join $DIST utilization_synth.rpt]
 report_timing_summary -file [file join $DIST timing_synth.rpt]
 
-#-----------------------------------------------------------------------------
-# Implement
-#
-# No severity overrides are needed here. Earlier drafts carried
-# `set_msg_config -id {INBB-3} -new_severity {WARNING}` plus Opt 31-30/31-236
-# downgrades to carry the DRU black box through implementation. That was a
-# workaround for the wrong thing: the DRU instances are now a tie-off in
-# x7gtx_sdi_control.v and the DRU sources are excluded, so there is no black
-# box in the netlist at all. Leaving the overrides out keeps the run honest --
-# a warning that is actually hiding a defect should be visible.
-#
-# Worth keeping in mind for the future, because both forms were tried:
-#   set_msg_config is IGNORED for DRC checks (Vivado says so, and then aborts
-#   opt_design anyway); DRC checks need
-#     set_property SEVERITY {WARNING} [get_drc_checks {INBB-3}]
-#   which is the form the vendor's own ai7030.xdc uses for REQP-44/46/52/56.
-#-----------------------------------------------------------------------------
-opt_design
-place_design
-phys_opt_design
-route_design
-report_timing_summary -file [file join $DIST timing_routed.rpt]
-report_utilization  -file [file join $DIST utilization_routed.rpt]
-report_drc          -file [file join $DIST drc_routed.rpt]
-
-write_checkpoint -force [file join $OUTDIR post_route.dcp]
-set stamp [clock format [clock seconds] -format "%Y%m%d_%H%M%S"]
-write_bitstream -force [file join $DIST "sdi2hdmi_${stamp}.bit"]
-puts "BUILD: done, bitstream in $DIST"
+puts "BUILD: synthesis done; checkpoint at $OUTDIR/post_synth.dcp"
+puts "BUILD: next step: compile_impl.ps1  (resumes implementation from the checkpoint)"
