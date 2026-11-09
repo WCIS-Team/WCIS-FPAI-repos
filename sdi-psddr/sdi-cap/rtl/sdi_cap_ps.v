@@ -257,7 +257,11 @@ module sdi_cap_ps (
         .S_AXI_HP2_AWLEN    (wr_awlen),
         .S_AXI_HP2_AWSIZE   (wr_awsize),
         .S_AXI_HP2_AWBURST  (wr_awburst),
-        .S_AXI_HP2_AWLOCK   (wr_awlock),
+        // AWLOCK 位宽（2026-11-10 修）：写帧器是 AXI4 主机，AWLOCK 1 bit
+        //（0=Normal/1=Exclusive）；HP 口是 AXI3，AWLOCK 2 bit
+        //（00=Normal/01=Exclusive/10=Locked）。AXI4 的 1 bit 语义对应 AXI3
+        // 的低位，高位补 0 即等价映射（本主机恒 Normal，恒 00）。
+        .S_AXI_HP2_AWLOCK   ({1'b0, wr_awlock}),
         .S_AXI_HP2_AWCACHE  (wr_awcache),
         .S_AXI_HP2_AWPROT   (wr_awprot),
         .S_AXI_HP2_AWQOS    (wr_awqos),
@@ -290,16 +294,25 @@ module sdi_cap_ps (
         .S_AXI_HP2_RREADY   (1'b0),
 
         // ---------------- GP1 -> 寄存器块（PS 主机，PL 从机，AXI4-Lite）----------------
-        // 全部直连，不经过任何中间 wire、不用 assign。方向按厂商 IP 原样：
-        //   PS7 的输出（我们的 output 端口）  : AWADDR/AWVALID/WDATA/WSTRB/
-        //                                      WVALID/ARADDR/ARVALID/BREADY/RREADY
-        //   寄存器块的输出（我们的 input 端口）: AWREADY/WREADY/BRESP/BVALID/
-        //                                      ARREADY/RDATA/RRESP/RVALID
+        // ★ 2026-11-10 修 ★ M_AXI_GP1_ACLK 原来整段漏接。它是 PS7 的**输入**
+        //   （GP 交换矩阵在这颗时钟下采样 PL 从机的回执）——悬空时 PS7 内部
+        //   综合成恒 0，GP1 上的任何 AXI 握手都成立不了：PS 对 0x8000_0000
+        //   的读写永远等不到应答。寄存器块用 fclk0_clk（50 MHz），时钟必须同源。
+        //   HP2 的 ACLK 一直是接好的（下面 clk_100m），漏的只有 GP1 这一个。
+        //   证据：stub ps_ai_processing_system7_0_0_stub.v:179 input M_AXI_GP1_ACLK
+        //   从未出现在本文件的 GP1 段；routed DRC 里也没有 PSB-2 类的报错，
+        //   即这个错综合/布线都不报，只有上板读写挂死才暴露。
         //
-        // 不用的 PS7 输出整段留空 ()：AWLEN/AWSIZE/AWBURST/AWLOCK/AWCACHE/
-        // AWPROT/AWQOS/AWID/WLAST/BID/ARLEN/ARSIZE/ARBURST/ARLOCK/ARCACHE/
-        // ARPROT/ARQOS/ARID/RLAST —— 它们是 PS7 的**输出**，接常量会被综合器
-        // 丢掉（Synth 8-2900），而且寄存器块是 AXI4-Lite，本来也不需要这些。
+        //   其余全部直连，不经过任何中间 wire、不用 assign。方向按厂商 IP 原样：
+        //     PS7 的输出（我们的 output 端口）  : AWADDR/AWVALID/WDATA/WSTRB/
+        //                                        WVALID/ARADDR/ARVALID/BREADY/RREADY
+        //     寄存器块的输出（我们的 input 端口）: AWREADY/WREADY/BRESP/BVALID/
+        //                                        ARREADY/RDATA/RRESP/RVALID
+        //   不用的 PS7 输出整段留空 ()：AWLEN/AWSIZE/AWBURST/AWLOCK/AWCACHE/
+        //   AWPROT/AWQOS/AWID/WLAST/BID/ARLEN/ARSIZE/ARBURST/ARLOCK/ARCACHE/
+        //   ARPROT/ARQOS/ARID/RLAST —— 接常量会被综合器丢掉（Synth 8-2900），
+        //   而且寄存器块是 AXI4-Lite，本来也不需要这些。
+        .M_AXI_GP1_ACLK     (fclk0_clk),
         .M_AXI_GP1_AWADDR   (m_awaddr),
         .M_AXI_GP1_AWVALID  (m_awvalid),
         .M_AXI_GP1_AWREADY  (m_awready),

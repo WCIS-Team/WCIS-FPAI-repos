@@ -14,7 +14,7 @@ SDI 口进来的像素流，**原样连续写进 PS DDR**，Linux 侧软件直�
 > `S:\work\WCIS\FPGA HD-SDI to PS Video Capture Card\`；wiki 收口页是
 > 《SDI到PS的数据搬运（厂商参考与设备事实）》。**本目录（工程本体）仍是权威副本**，
 > 快照随此后改动不再自动同步。同日原工程由 `S:\apps\llm\agentwork\sdi-cap`
-> 迁至本目录（`S:\work\WCIS\sdi-cap`），`agentwork` 下不再保留副本。
+> 迁至本目录（`S:\work\WCIS\repos\sdi-psddr\sdi-cap`），`agentwork` 下不再保留副本。
 
 ---
 
@@ -106,6 +106,7 @@ run_gl_bench.bat 200000                                          # 门级：综�
 |---|---|---|---|
 | `tb_sdi_stream_wr.v` | `sdi_px_pack` → `sdi_px_afifo` → `sdi_stream_wr` → HP2 从设备模型 | 19 条：`B_LAT_*` / `W_LAT_*` / `RING_*` / `PX_*` / `RST_MID` | `data marker frames axi ring drain quiet ovf` 全 PASS |
 | `tb_sdi_cap_regs.v` | `sdi_cap_regs`（CSR）+ 真实 AXI4-Lite 主模型 | 1 条：`REGS`（52 项检查） | `REGS RESULT: PASS` |
+| `tb_sdi_cap_meas.v`（2026-11-10 补） | `sdi_cap_meas`（幅面/帧周期测量）：电平语义合成时序 | 1 条：`MEAS`（15 项检查） | `MEAS RESULT: PASS`（`-Only MEAS` 可单跑） |
 | `run_gl_bench`（门级） | 综合后 `sdi_stream_wr` 网表 + UNISIM 原语，跑 `B_LAT_32` 同一套 | 1 条 | `data/axi/ring/drain/quiet/ovf` 全 PASS，数字与行为级逐项相同（`设计说明.md` §6.13）|
 
 第二条几十秒就能跑完，**第一次跑就抓出三个 CSR 级 bug**（`设计说明.md` §6.23–§6.25：
@@ -151,8 +152,11 @@ PS DDR 只有 1 GB 而且内核住在里面，写死一个物理地址很可能�
    只要 GT 出得了数据就会写进 PS DDR，从寄存器就能判断是哪一种情况。
 3. **换位流**：板上三条运行时重载通道已实测全部失效，
    只能 **BOOT.bin 替换 + 重启**。本轮可直接换的镜像：
-   `S:\work\WCIS\sdi-cap\dist\BOOT_sdi_cap_20261015_230629.bin`（md5 `03AB070C…`，
-   拼法与交叉核对见 `docs/上板检查.md` §二）。
+   `S:\work\WCIS\repos\sdi-psddr\sdi-cap\dist\BOOT_sdi_cap_20261015_230629.bin`
+   （md5 `03AB070C…`，拼法与交叉核对见 `docs/上板检查.md` §二）。
+   ★ 2026-11-10 注 ★：该镜像出自 2026-10-15 的 RTL，**不含本轮修复**
+   （GP1 时钟、meas 幅面、rearm 跨域等，见 `docs/设计说明.md` §6.27）——
+   修复要用 `build.bat` 重新出位流后再上板。
 4. **看灯**：`led[1]`=M6 是 SDI 传输帧锁定（`rx0_locked`，锁定常亮），
    `led[0]`=J1 是恢复时钟心跳（`rx_usrclk_cnt[25]`，慢闪）。
    与厂商 `LED_MON=1` 同向；2026-10-16 更正，此前写反。

@@ -79,32 +79,47 @@ module sdi_cap_meas #(
 
     //--------------------------------------------------------------------------
     // 有效幅面测量（取最大值，不假设）
+    //
+    // ★ 2026-11-10 修 ★ 这一整块原来数不出东西，MEAS_W/MEAS_H/GEOM_VALID
+    //   全是 0，demo 永远等不到幅面有效。两个根因：
+    //   1. pix_de = pix_vs & pix_hs（rx_sdi 的 YCbCr422_data_en 就是这么拼的），
+    //      即 de ⊆ hs。原来写的是"hs 高时清零、de 时累加"——累加分支是
+    //      死代码，pix_in_line 恒 0，w_max 永远锁不进 1920。
+    //   2. lines_in_frame 只累加从不清零，h_max 锁进来的是跨帧累计值
+    //      （1080、2160、3240…），MEAS_H 是垃圾。
+    //   正确语义照抄已验证的 vendor sdi_status.v:156-209：
+    //   hs 上升沿发布**上一行**的宽度、给新行播下第一个像素的种子
+    //   （hs 上升这拍本身就是本行第一个有效像素——de 与 hs 同拍起来）；
+    //   vs 上升沿发布**上一帧**的行数，且首行的 hs 上升与 vs 上升同拍，
+    //   要在同一拍给行计数播种子，否则高度少一行。
     //--------------------------------------------------------------------------
     reg [15:0] pix_in_line;
     reg [15:0] lines_in_frame;
+    reg [15:0] w_max, h_max;
 
     always @(posedge clk) begin
         if (!rst_n) begin
             pix_in_line    <= 16'd0;
             lines_in_frame <= 16'd0;
-        end else if (pix_vs) begin
-            if (pix_hs) pix_in_line <= 16'd0;
-            else if (pix_de) pix_in_line <= pix_in_line + 16'd1;
-            if (hs_rise) lines_in_frame <= lines_in_frame + 16'd1;
+            w_max          <= 16'd0;
+            h_max          <= 16'd0;
         end else begin
-            pix_in_line <= 16'd0;
-        end
-    end
+            if (hs_rise) begin
+                // 发布的是刚结束那行的旧值；新行从这拍开始数
+                if (pix_in_line > w_max) w_max <= pix_in_line;
+                pix_in_line <= 16'd1;
+            end else if (pix_de) begin
+                pix_in_line <= pix_in_line + 16'd1;
+            end
 
-    reg [15:0] w_max, h_max;
-    always @(posedge clk) begin
-        if (!rst_n) begin
-            w_max <= 16'd0;
-            h_max <= 16'd0;
-        end else if (pix_vs && pix_de && (pix_in_line > w_max)) begin
-            w_max <= pix_in_line;
-        end else if (vs_rise && pix_vs) begin
-            h_max <= lines_in_frame;
+            if (pix_vs) begin
+                if (vs_rise) begin
+                    h_max          <= lines_in_frame;             // 发布刚结束的帧
+                    lines_in_frame <= hs_rise ? 16'd1 : 16'd0;    // 首行 hs 与 vs 同拍
+                end else if (hs_rise) begin
+                    lines_in_frame <= lines_in_frame + 16'd1;
+                end
+            end
         end
     end
 
@@ -122,35 +137,36 @@ module sdi_cap_meas #(
 
     //--------------------------------------------------------------------------
     // 帧周期：两次 vsync 之间累计多少个像素时钟
+    //
+    // ★ 2026-11-10 修 ★ 原来经 fperiod_q（fcount 的一拍延迟副本）发布，
+    //   发布的是 P-1：vs_rise 那拍 fcount 已经停在最后一拍，fperiod_q 又
+    //   慢一拍，FPS_X100 系统性偏小。vendor sdi_status.v:217-229 的做法是
+    //   vs 上升当拍直接发布 fcount 本身，这里改成一致。
     //--------------------------------------------------------------------------
     reg [31:0] fcount;
-    reg [31:0] fperiod_q;
     reg        period_valid;
 
     always @(posedge clk) begin
         if (!rst_n) begin
             fcount       <= 32'd0;
-            fperiod_q    <= 32'd0;
             period_valid <= 1'b0;
             meas_fperiod <= 32'd0;
             line_cnt     <= 32'd0;
         end else begin
             if (hs_rise) line_cnt <= line_cnt + 32'd1;
-            // fcount 的一拍延迟副本：vsync 到达时要用上一拍的计数值当帧周期。
-            // （之前把这条更新删掉过，结果 meas_fperiod 一直读一个只被复位过的
-            //   寄存器 —— FPS_X100 永远是 0，而且 Vivado 报 fperiod_q 多驱动。
-            //   这个寄存器有真实用途，不是死代码。）
-            fperiod_q <= fcount;
 
             if (!sig_locked) begin
-                // 没锁定时周期没有意义，但不停止计数：软件能看到计数在动，
-                // 这正是"GT 活着但认不出格式"的判据。
+                // 失锁期间不累计也不发布：fcount 保持 0，period_valid 撤掉，
+                // meas_fperiod 冻结在最后一次发布的值（period_valid 挡住了
+                // 重锁后第一帧的半截周期）。行/帧脉冲（line_start/frame_start/
+                // line_cnt）不受这里影响，照常上报——那才是"GT 活着但认不出
+                // 格式"时还能看到的东西。
                 fcount       <= 32'd0;
                 period_valid <= 1'b0;
             end else if (vs_rise) begin
-                if (period_valid) meas_fperiod <= fperiod_q;
+                if (period_valid) meas_fperiod <= fcount;   // 当拍直接发布，不是 P-1
                 period_valid <= 1'b1;
-                fcount       <= 32'd1;
+                fcount       <= 32'd1;   // vs 上升这拍算周期的第 1 个时钟
             end else if (fcount != 32'hFFFFFFFF) begin
                 fcount <= fcount + 32'd1;
             end

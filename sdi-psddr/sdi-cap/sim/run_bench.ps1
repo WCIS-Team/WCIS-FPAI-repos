@@ -7,8 +7,9 @@
 #   powershell -ExecutionPolicy Bypass -File run_bench.ps1 -Only B_LAT_127
 #   powershell -ExecutionPolicy Bypass -File run_bench.ps1 -Only REGS
 #
-# 两条链：tb_sdi_stream_wr（像素链 19 个套件）+ tb_sdi_cap_regs（CSR，1 条）。
-# -Full 才包含 W_LAT_*/RING_*/PX_*/RST_MID；REGS 无参数，默认也跑。
+# 三条链：tb_sdi_stream_wr（像素链 19 个套件）+ tb_sdi_cap_regs（CSR，1 条）
+#        + tb_sdi_cap_meas（幅面/帧周期测量，1 条）。
+# -Full 才包含 W_LAT_*/RING_*/PX_*/RST_MID；REGS/MEAS 无参数，默认也跑。
 #
 # 依赖：Vivado 2018.3 的 xvlog / xelab / xsim
 # 产物：bench.txt（每次覆盖，被测参数）、run_<套件名>.log（xsim 原始输出）
@@ -154,9 +155,54 @@ if ($Only -eq '' -or $Only -eq 'REGS') {
     }
 }
 
+#------------------------------------------------------------------------------
+# 测量模块回归：sdi_cap_meas —— MEAS_W/MEAS_H/GEOM_VALID 的唯一来源
+#
+# demo 抓帧的门槛是 GEOM_VALID，meas 数不出东西 = 一帧都抓不到。
+# 2026-11-10 之前这个模块没有任何回归，行内累加死代码、行数跨帧累计、
+# 帧周期少一拍三个 bug 全是靠审计读出来的。tb_sdi_cap_meas 用
+# 1080p30 等比缩小的 400x300 格式把语义钉死：
+#   meas_w/h/valid 就位、fperiod == H_TOT*W_TOT（不是 P-1）、
+#   行宽改宽后 max 跟着走、行数重播种不累计、失锁不乱发周期。
+#   -Only MEAS   只跑这一条
+#------------------------------------------------------------------------------
+if ($Only -eq '' -or $Only -eq 'MEAS') {
+    Write-Host "=== meas suite (sdi_cap_meas) ===" -ForegroundColor Cyan
+    $msrcs = @(
+        (Join-Path $cap 'sdi_cap_meas.v'),
+        (Join-Path $sim 'tb_sdi_cap_meas.v')
+    )
+    $mout = & $xvlog @msrcs 2>&1 | Out-String
+    $mout.Split("`n") | Where-Object { $_ -match 'ERROR|WARNING' } | ForEach-Object { $_.Trim() }
+    if ($mout -match '(?m)^ERROR') { Write-Host "xvlog FAILED (meas)"; exit 1 }
+
+    $meout = & $xelab tb_sdi_cap_meas -s tbmeas --debug typical 2>&1 | Out-String
+    if ($meout -match '(?m)^ERROR') {
+        $meout.Split("`n") | Where-Object { $_ -match 'ERROR' } | ForEach-Object { $_.Trim() }
+        Write-Host "xelab FAILED (meas)"; exit 1
+    }
+
+    $mres = & $xsim tbmeas -runall 2>&1 | Out-String
+    [IO.File]::WriteAllText((Join-Path $sim 'run_MEAS.log'), $mres)
+
+    $mfirstFail = ($mres -split "`r?`n" | Where-Object { $_ -match 'FAIL' } | Select-Object -First 3)
+    $mresLine   = ([regex]::Match($mres, '(?m)^MEAS RESULT:.*$')).Value.Trim()
+    $mok        = ([regex]::Matches($mres, '(?m)^\s+ok\s')).Count
+
+    [void]$rows.Add([pscustomobject]@{
+        Suite = 'MEAS'
+        Throughput = ("{0} checks" -f $mok)
+        Check = $mresLine
+    })
+    if ($mresLine -notmatch 'PASS') {
+        [void]$errs.Add("--- MEAS: $mresLine")
+        foreach ($l in $mfirstFail) { [void]$errs.Add("      $($l.Trim())") }
+    }
+}
+
 if ($rows.Count -eq 0) {
     Write-Host "************ NO SUITES RAN ************" -ForegroundColor Red
-    Write-Host ("     -Only '{0}' matched nothing. W_LAT_*/RING_*/PX_*/RST_MID only exist with -Full; REGS is a single suite." -f $Only)
+    Write-Host ("     -Only '{0}' matched nothing. W_LAT_*/RING_*/PX_*/RST_MID only exist with -Full; REGS/MEAS are single suites." -f $Only)
     exit 1
 }
 

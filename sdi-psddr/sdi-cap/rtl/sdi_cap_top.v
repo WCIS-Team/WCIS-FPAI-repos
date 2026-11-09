@@ -276,15 +276,26 @@ module sdi_cap_top (
     sdi_cap_cdc #(.W(1))  u_cdc_en   (.clk_dst(cam_clk), .rst_dst_n(sys_rst_n),
                                       .d_bus(cfg_enable),
                                       .q_bus(p_enable));
-    sdi_cap_cdc #(.W(1))  u_cdc_re   (.clk_dst(clk_100m), .rst_dst_n(sys_rst_n),
-                                      .d_bus(cfg_rearm),
-                                      .q_bus(p_rearm));
+    // ★ 2026-11-10 修 ★ cfg_rearm 是寄存器块给的**单拍脉冲**（写 A_REARM 那拍
+    //   拉高一下）。原来两个都走 sdi_cap_cdc 两级电平同步：
+    //     - u_cdc_re -> clk_100m：50 MHz 的一拍在 100 MHz 上跨两拍，碰巧能采到；
+    //     - u_cdc_re_c -> cam_clk：HD 74.25 MHz 勉强，SD 13.5 MHz 时 20 ns 的
+    //       脉冲整个落在两个 74 ns 采样沿之间，**约七成概率直接丢掉** ——
+    //       打包器收不到 rearm，重配后第一帧的帧标记就错位。
+    //   电平同步器本来就管不了单拍脉冲，正确工具是库里现成的
+    //   sdi_cap_cdc_pulse（源域翻转 + 目的域边沿检测，任何频率都不丢），
+    //   之前一直没被例化，这里用上。两个目的域都用它，语义统一。
+    sdi_cap_cdc_pulse u_cdc_re   (.clk_src(fclk0_clk), .rst_src_n(sys_rst_n),
+                                  .pulse_src(cfg_rearm),
+                                  .clk_dst(clk_100m), .rst_dst_n(sys_rst_n),
+                                  .pulse_dst(p_rearm));
     sdi_cap_cdc #(.W(96)) u_cdc_addr (.clk_dst(clk_100m), .rst_dst_n(sys_rst_n),
                                       .d_bus({cfg_buf_addr, cfg_ring_bytes}),
                                       .q_bus({p_addr, p_ring}));
-    sdi_cap_cdc #(.W(1))  u_cdc_re_c (.clk_dst(cam_clk), .rst_dst_n(sys_rst_n),
-                                      .d_bus(cfg_rearm),
-                                      .q_bus(p_rearm_cam));
+    sdi_cap_cdc_pulse u_cdc_re_c (.clk_src(fclk0_clk), .rst_src_n(sys_rst_n),
+                                  .pulse_src(cfg_rearm),
+                                  .clk_dst(cam_clk), .rst_dst_n(sys_rst_n),
+                                  .pulse_dst(p_rearm_cam));
     // 丢字是"置上就一直挂着"的粘滞电平，不是脉冲，两级同步足够
     sdi_cap_cdc #(.W(1))  u_cdc_ovf  (.clk_dst(clk_100m), .rst_dst_n(sys_rst_n),
                                       .d_bus(px_overflow_cam),
@@ -310,7 +321,11 @@ module sdi_cap_top (
         .sig_locked   (sig_locked),
         .cfg_enable   (p_enable),
         .px_valid     (px_valid),
-        .px_data      (y422_data),
+        // ★ 2026-11-10 修 ★ px_data 原来接着 y422_data。它是 meas 的输出端口
+        //   （assign px_data = pix 的直通），再把同一根输入网接回输出端口，
+        //   等于自驱网；打包器实际用的是下一级的 y422_data（u_pack.px_data），
+        //   所以这个连接既冗余又制造多驱动的隐患，删掉。
+        .px_data      (),
         .line_start   (line_start),
         .frame_start  (frame_start),
         .meas_w       (meas_w),
