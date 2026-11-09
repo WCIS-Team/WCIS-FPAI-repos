@@ -6,3 +6,7 @@
 	path = loomos
 	url = https://github.com/WCIS-Team/loomos.git
 	branch = main
+[submodule "tkmFPGA"]
+	path = tkmFPGA
+	url = https://github.com/WCIS-Team/tkmFPGA.git
+	branch = main
